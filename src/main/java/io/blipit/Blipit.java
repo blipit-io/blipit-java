@@ -6,9 +6,15 @@ import io.sentry.SentryLevel;
 import io.sentry.protocol.User;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 public final class Blipit {
     public static final String DEFAULT_ENDPOINT = "https://in.blipit.io";
+    public static final String PUBLIC_KEY_WARNING =
+            "[blipit] login attempts need the project's secret key (blipit_sk_...). This SDK was started with the public key, so captureSecurity sends nothing. Use the secret key on the server.";
+
+    private static volatile boolean publicKey;
+    private static final AtomicBoolean publicKeyWarned = new AtomicBoolean();
 
     private Blipit() {}
 
@@ -35,6 +41,7 @@ public final class Blipit {
         if (o.project == null || o.project.isEmpty()) {
             throw new IllegalArgumentException("Blipit.init needs the project id");
         }
+        publicKey = o.key.startsWith("blipit_pk_");
         Sentry.init(options -> {
             options.setDsn(dsn(o.key, o.project, o.endpoint));
             options.setEnvironment(o.environment);
@@ -91,6 +98,12 @@ public final class Blipit {
             String ip,
             String userAgent,
             String target) {
+        if (publicKey) {
+            if (publicKeyWarned.compareAndSet(false, true)) {
+                System.err.println(PUBLIC_KEY_WARNING);
+            }
+            return;
+        }
         Map<String, Object> context = new LinkedHashMap<>();
         context.put("kind", kind);
         context.put("actor", actor);
