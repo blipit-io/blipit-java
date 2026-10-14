@@ -1,8 +1,13 @@
 package io.blipit;
 
 import io.sentry.Breadcrumb;
+import io.sentry.EventProcessor;
+import io.sentry.Hint;
 import io.sentry.Sentry;
+import io.sentry.SentryEvent;
 import io.sentry.SentryLevel;
+import io.sentry.protocol.SdkVersion;
+import io.sentry.protocol.SentryPackage;
 import io.sentry.protocol.User;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -10,6 +15,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 public final class Blipit {
     public static final String DEFAULT_ENDPOINT = "https://in.blipit.io";
+    public static final String VERSION = "0.1.2";
+    public static final String PACKAGE_NAME = "maven:io.blipit:blipit";
     public static final String PUBLIC_KEY_WARNING =
             "[blipit] login attempts need the project's secret key (blipit_sk_...). This SDK was started with the public key, so captureSecurity sends nothing. Use the secret key on the server.";
 
@@ -48,8 +55,30 @@ public final class Blipit {
             options.setRelease(o.release);
             options.setTracesSampleRate(o.tracesSampleRate);
             options.setSendDefaultPii(false);
+            options.addEventProcessor(IDENTITY);
         });
     }
+
+    static final EventProcessor IDENTITY = new EventProcessor() {
+        @Override
+        public SentryEvent process(SentryEvent event, Hint hint) {
+            try {
+                SdkVersion sdk = event.getSdk();
+                if (sdk == null) {
+                    return event;
+                }
+                java.util.Set<SentryPackage> packages = sdk.getPackageSet();
+                for (SentryPackage p : packages) {
+                    if (PACKAGE_NAME.equals(p.getName())) {
+                        return event;
+                    }
+                }
+                sdk.addPackage(PACKAGE_NAME, VERSION);
+            } catch (RuntimeException ignored) {
+            }
+            return event;
+        }
+    };
 
     public static void captureException(Throwable throwable) {
         Sentry.captureException(throwable);

@@ -60,6 +60,7 @@ class BlipitTest {
             assertTrue(lines.length >= 3, "envelope has " + lines.length + " lines");
             assertTrue(lines[2].contains("\"formatted\":\"hello from java\""), lines[2]);
             assertTrue(lines[2].contains("\"environment\":\"test\""), lines[2]);
+            assertTrue(lines[2].contains("\"name\":\"maven:io.blipit:blipit\",\"version\":\"" + Blipit.VERSION + "\""), lines[2]);
         } finally {
             Blipit.close();
             server.stop(0);
