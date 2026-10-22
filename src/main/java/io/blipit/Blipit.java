@@ -9,7 +9,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 public final class Blipit {
     public static final String DEFAULT_ENDPOINT = "https://in.blipit.io";
-    public static final String VERSION = "0.2.0";
+    public static final String VERSION = "0.2.1";
     public static final String SDK_NAME = "blipit-java";
     public static final String PACKAGE_NAME = "maven:io.blipit:blipit";
     public static final String PUBLIC_KEY_WARNING =

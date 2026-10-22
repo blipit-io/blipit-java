@@ -195,6 +195,32 @@ class NuggetsTest {
     }
 
     @Test
+    void platformMismatchStopsSendingWithThatKey() throws Exception {
+        String message = "This project is for iOS. Create a separate Backend project in Blipit and use its key.";
+        java.io.ByteArrayOutputStream err = new java.io.ByteArrayOutputStream();
+        java.io.PrintStream previous = System.err;
+        System.setErr(new java.io.PrintStream(err, true, "UTF-8"));
+        try (Ingest ingest = new Ingest()) {
+            ingest.script.add(new Ingest.Answer(409, "{\"error\":\"" + message + "\",\"reason\":\"platform_mismatch\",\"project_platform\":\"ios\",\"sent_platform\":\"backend\"}", null));
+            Config c = config(ingest.url(), dir);
+            c.key = "blipit_sk_mismatch";
+            Nuggets n = new Nuggets(c);
+            n.captureMessage("one", Level.INFO);
+            ingest.await(1, 5000);
+            Thread.sleep(100);
+            n.captureMessage("two", Level.INFO);
+            n.flush(2000);
+            Thread.sleep(100);
+            assertEquals(1, ingest.hits.size());
+            assertEquals(0, n.outbox.size());
+            n.close();
+        } finally {
+            System.setErr(previous);
+        }
+        assertEquals(1, err.toString("UTF-8").split(Pattern.quote(message), -1).length - 1);
+    }
+
+    @Test
     void serverErrorsKeepTheEventAndRejectionsDropIt() throws Exception {
         try (Ingest ingest = new Ingest()) {
             ingest.script.add(new Ingest.Answer(503, "{}", null));

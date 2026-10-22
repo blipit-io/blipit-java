@@ -14,6 +14,9 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.ScheduledExecutorService;
@@ -38,6 +41,8 @@ public final class Outbox {
             this.retryAfter = retryAfter;
         }
     }
+
+    private static final Set<String> REFUSED = ConcurrentHashMap.newKeySet();
 
     private final Config config;
     private final File folder;
@@ -77,7 +82,33 @@ public final class Outbox {
         kick();
     }
 
+    public static boolean refused(Config config) {
+        return REFUSED.contains(config.key);
+    }
+
+    static boolean mismatch(Config config, Reply reply) {
+        if (reply.status != 409) return false;
+        Object parsed;
+        try {
+            parsed = Json.parse(reply.body);
+        } catch (RuntimeException e) {
+            return false;
+        }
+        if (!(parsed instanceof Map) || !"platform_mismatch".equals(((Map<?, ?>) parsed).get("reason"))) return false;
+        if (REFUSED.add(config.key)) {
+            Object error = ((Map<?, ?>) parsed).get("error");
+            System.err.println("[blipit] " + (error instanceof String ? error : "This key belongs to a project for another platform.") + " Blipit stopped sending with this key until the app restarts.");
+        }
+        return true;
+    }
+
+    private synchronized void dropAll() {
+        memory.clear();
+        if (folder != null) for (File f : files()) f.delete();
+    }
+
     public synchronized void persist(String path, Object body) {
+        if (refused(config)) return;
         String item = path + "\n" + Json.encode(body);
         if (folder == null) {
             memory.addLast(item);
@@ -166,6 +197,7 @@ public final class Outbox {
 
     void drain() {
         while (true) {
+            if (refused(config)) return;
             long now = System.currentTimeMillis();
             if (now < pausedUntil) {
                 schedule(pausedUntil - now);
@@ -184,6 +216,10 @@ public final class Outbox {
                 reply = post(text.substring(0, nl), text.substring(nl + 1).getBytes(UTF8));
             } catch (IOException e) {
                 backoff();
+                return;
+            }
+            if (mismatch(config, reply)) {
+                dropAll();
                 return;
             }
             if (reply.status == 429) {

@@ -12,7 +12,7 @@ repositories {
 }
 
 dependencies {
-    implementation("com.github.blipit-io:blipit-java:v0.2.0")
+    implementation("com.github.blipit-io:blipit-java:v0.2.1")
 }
 ```
 
@@ -27,7 +27,7 @@ Maven:
 <dependency>
   <groupId>com.github.blipit-io</groupId>
   <artifactId>blipit-java</artifactId>
-  <version>v0.2.0</version>
+  <version>v0.2.1</version>
 </dependency>
 ```
 
