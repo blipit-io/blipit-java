@@ -1,118 +1,134 @@
 package io.blipit;
 
-import io.sentry.Breadcrumb;
-import io.sentry.EventProcessor;
-import io.sentry.Hint;
-import io.sentry.Sentry;
-import io.sentry.SentryEvent;
-import io.sentry.SentryLevel;
-import io.sentry.protocol.SdkVersion;
-import io.sentry.protocol.SentryPackage;
-import io.sentry.protocol.User;
+import io.blipit.nuggets.Config;
+import io.blipit.nuggets.Nuggets;
+import java.io.File;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 public final class Blipit {
     public static final String DEFAULT_ENDPOINT = "https://in.blipit.io";
-    public static final String VERSION = "0.1.2";
+    public static final String VERSION = "0.2.0";
+    public static final String SDK_NAME = "blipit-java";
     public static final String PACKAGE_NAME = "maven:io.blipit:blipit";
     public static final String PUBLIC_KEY_WARNING =
             "[blipit] login attempts need the project's secret key (blipit_sk_...). This SDK was started with the public key, so captureSecurity sends nothing. Use the secret key on the server.";
 
+    private static volatile Nuggets client;
     private static volatile boolean publicKey;
     private static final AtomicBoolean publicKeyWarned = new AtomicBoolean();
+    private static Thread shutdownHook;
 
     private Blipit() {}
 
-    public static String dsn(String key, String project, String endpoint) {
-        if (endpoint == null || endpoint.isEmpty()) {
-            endpoint = DEFAULT_ENDPOINT;
-        }
-        String scheme = endpoint.startsWith("http://") ? "http" : "https";
-        String host = endpoint;
-        int i = host.indexOf("://");
-        if (i >= 0) {
-            host = host.substring(i + 3);
-        }
-        while (host.endsWith("/")) {
-            host = host.substring(0, host.length() - 1);
-        }
-        return scheme + "://" + key + "@" + host + "/" + project;
-    }
-
-    public static void init(BlipitOptions o) {
+    public static synchronized void init(BlipitOptions o) {
         if (o.key == null || o.key.isEmpty()) {
             throw new IllegalArgumentException("Blipit.init needs the project's public key");
         }
         if (o.project == null || o.project.isEmpty()) {
             throw new IllegalArgumentException("Blipit.init needs the project id");
         }
+        close();
         publicKey = o.key.startsWith("blipit_pk_");
-        Sentry.init(options -> {
-            options.setDsn(dsn(o.key, o.project, o.endpoint));
-            options.setEnvironment(o.environment);
-            options.setRelease(o.release);
-            options.setTracesSampleRate(o.tracesSampleRate);
-            options.setSendDefaultPii(false);
-            options.addEventProcessor(IDENTITY);
-        });
-    }
-
-    static final EventProcessor IDENTITY = new EventProcessor() {
-        @Override
-        public SentryEvent process(SentryEvent event, Hint hint) {
-            try {
-                SdkVersion sdk = event.getSdk();
-                if (sdk == null) {
-                    return event;
-                }
-                java.util.Set<SentryPackage> packages = sdk.getPackageSet();
-                for (SentryPackage p : packages) {
-                    if (PACKAGE_NAME.equals(p.getName())) {
-                        return event;
-                    }
-                }
-                sdk.addPackage(PACKAGE_NAME, VERSION);
-            } catch (RuntimeException ignored) {
-            }
-            return event;
+        Config c = new Config();
+        c.key = o.key;
+        c.endpoint = o.endpoint;
+        c.release = o.release;
+        c.environment = o.environment;
+        c.sdkName = SDK_NAME;
+        c.sdkVersion = VERSION;
+        c.platform = "java";
+        c.dir = o.cacheDir == null ? defaultDir(o.project) : o.cacheDir;
+        c.contexts.put("os", pair(System.getProperty("os.name"), System.getProperty("os.version")));
+        c.contexts.put("runtime", pair("java", System.getProperty("java.version")));
+        Nuggets n;
+        try {
+            n = new Nuggets(c);
+        } catch (IllegalStateException e) {
+            c.dir = null;
+            n = new Nuggets(c);
         }
-    };
-
-    public static void captureException(Throwable throwable) {
-        Sentry.captureException(throwable);
+        client = n;
+        n.installCrashHandler();
+        n.outbox.kick();
+        final Nuggets hooked = n;
+        shutdownHook = new Thread(new Runnable() {
+            @Override
+            public void run() {
+                hooked.flush(2000);
+            }
+        }, "blipit-shutdown");
+        try {
+            Runtime.getRuntime().addShutdownHook(shutdownHook);
+        } catch (IllegalStateException ignored) {
+        }
     }
 
-    public static void captureMessage(String message) {
-        Sentry.captureMessage(message);
+    static File defaultDir(String project) {
+        String tmp = System.getProperty("java.io.tmpdir");
+        return tmp == null ? null : new File(tmp, "blipit-" + project.replaceAll("[^A-Za-z0-9_-]", ""));
     }
 
-    public static void captureMessage(String message, SentryLevel level) {
-        Sentry.captureMessage(message, level);
+    private static Map<String, Object> pair(String name, String version) {
+        Map<String, Object> m = new LinkedHashMap<String, Object>();
+        if (name != null) m.put("name", name);
+        if (version != null) m.put("version", version);
+        return m;
     }
 
-    public static void setUser(User user) {
-        Sentry.setUser(user);
+    static Nuggets client() {
+        return client;
+    }
+
+    public static String captureException(Throwable throwable) {
+        Nuggets n = client;
+        return n == null ? null : n.captureException(throwable, true, Level.ERROR);
+    }
+
+    public static String captureMessage(String message) {
+        return captureMessage(message, Level.INFO);
+    }
+
+    public static String captureMessage(String message, Level level) {
+        Nuggets n = client;
+        return n == null ? null : n.captureMessage(message, level);
     }
 
     public static void setUser(String id, String email) {
-        User user = new User();
-        user.setId(id);
-        user.setEmail(email);
-        Sentry.setUser(user);
+        setUser(id, email, null);
+    }
+
+    public static void setUser(String id, String email, String username) {
+        Nuggets n = client;
+        if (n != null) n.setUser(id, email, username);
     }
 
     public static void setTag(String key, String value) {
-        Sentry.setTag(key, value);
+        Nuggets n = client;
+        if (n != null) n.setTag(key, value);
     }
 
-    public static void addBreadcrumb(Breadcrumb breadcrumb) {
-        Sentry.addBreadcrumb(breadcrumb);
+    public static void setExtra(String key, Object value) {
+        Nuggets n = client;
+        if (n != null) n.setExtra(key, value);
+    }
+
+    public static void setContext(String name, Map<String, Object> values) {
+        setExtra(name, values);
     }
 
     public static void addBreadcrumb(String message) {
-        Sentry.addBreadcrumb(message);
+        addBreadcrumb(message, null, Level.INFO);
+    }
+
+    public static void addBreadcrumb(String message, String category) {
+        addBreadcrumb(message, category, Level.INFO);
+    }
+
+    public static void addBreadcrumb(String message, String category, Level level) {
+        Nuggets n = client;
+        if (n != null) n.addBreadcrumb(category, message, level, null);
     }
 
     public static void captureSecurity(String kind, String actor) {
@@ -133,39 +149,53 @@ public final class Blipit {
             }
             return;
         }
-        Map<String, Object> context = new LinkedHashMap<>();
+        Nuggets n = client;
+        if (n == null || kind == null || actor == null || actor.trim().isEmpty()) return;
+        Map<String, Object> context = new LinkedHashMap<String, Object>();
         context.put("kind", kind);
-        context.put("actor", actor);
-        put(context, "outcome", outcome);
-        put(context, "actor_id", actorId);
-        put(context, "ip", ip);
-        put(context, "user_agent", userAgent);
-        put(context, "target", target);
-        SentryLevel level = "login_failed".equals(kind) || "login_blocked".equals(kind)
-                ? SentryLevel.WARNING
-                : SentryLevel.INFO;
-        Sentry.withScope(scope -> {
-            scope.setContexts("security", context);
-            scope.setTag("security.kind", kind);
-            Sentry.captureMessage(kind + " for " + actor, level);
-        });
+        context.put("actor", cut(actor.trim(), 256));
+        put(context, "outcome", outcome, 64);
+        put(context, "actor_id", actorId, 128);
+        put(context, "ip", ip, 45);
+        put(context, "user_agent", userAgent, 512);
+        put(context, "target", target, 256);
+        Level level = "login_failed".equals(kind) || "login_blocked".equals(kind) || "privilege_granted".equals(kind)
+                ? Level.WARNING
+                : Level.INFO;
+        n.captureSecurity(context, kind + " for " + actor, level);
     }
 
-    private static void put(Map<String, Object> context, String key, String value) {
+    private static String cut(String s, int max) {
+        return s.length() <= max ? s : s.substring(0, max);
+    }
+
+    private static void put(Map<String, Object> context, String key, String value, int max) {
         if (value != null && !value.isEmpty()) {
-            context.put(key, value);
+            context.put(key, cut(value, max));
         }
     }
 
-    public static void flush(long timeoutMillis) {
-        Sentry.flush(timeoutMillis);
+    public static boolean flush(long timeoutMillis) {
+        Nuggets n = client;
+        return n == null || n.flush(timeoutMillis);
     }
 
-    public static void flush() {
-        flush(2000);
+    public static boolean flush() {
+        return flush(2000);
     }
 
-    public static void close() {
-        Sentry.close();
+    public static synchronized void close() {
+        Nuggets n = client;
+        client = null;
+        if (n == null) return;
+        n.flush(2000);
+        n.close();
+        if (shutdownHook != null) {
+            try {
+                Runtime.getRuntime().removeShutdownHook(shutdownHook);
+            } catch (IllegalStateException ignored) {
+            }
+            shutdownHook = null;
+        }
     }
 }

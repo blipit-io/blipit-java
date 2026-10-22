@@ -7,6 +7,7 @@ public final class BlipitOptions {
     public final String release;
     public final double tracesSampleRate;
     public final String endpoint;
+    public final java.io.File cacheDir;
 
     private BlipitOptions(Builder b) {
         key = b.key;
@@ -15,6 +16,7 @@ public final class BlipitOptions {
         release = b.release;
         tracesSampleRate = b.tracesSampleRate;
         endpoint = b.endpoint;
+        cacheDir = b.cacheDir;
     }
 
     public static Builder builder() {
@@ -28,6 +30,7 @@ public final class BlipitOptions {
         private String release;
         private double tracesSampleRate = 0.0;
         private String endpoint = Blipit.DEFAULT_ENDPOINT;
+        private java.io.File cacheDir;
 
         public Builder key(String key) {
             this.key = key;
@@ -61,6 +64,11 @@ public final class BlipitOptions {
 
         public Builder endpoint(String endpoint) {
             this.endpoint = endpoint;
+            return this;
+        }
+
+        public Builder cacheDir(java.io.File cacheDir) {
+            this.cacheDir = cacheDir;
             return this;
         }
 

@@ -4,7 +4,7 @@ plugins {
 }
 
 group = "io.blipit"
-version = "0.1.2"
+version = "0.2.0"
 
 repositories {
     mavenCentral()
@@ -14,12 +14,16 @@ java {
     withSourcesJar()
 }
 
-tasks.withType<JavaCompile>().configureEach {
+tasks.named<JavaCompile>("compileJava") {
+    options.release.set(8)
+    options.compilerArgs.add("-Xlint:-options")
+}
+
+tasks.named<JavaCompile>("compileTestJava") {
     options.release.set(17)
 }
 
 dependencies {
-    api("io.sentry:sentry:8.58.0")
     testImplementation(platform("org.junit:junit-bom:6.1.3"))
     testImplementation("org.junit.jupiter:junit-jupiter")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
@@ -39,7 +43,7 @@ publishing {
             artifactId = "blipit"
             pom {
                 name.set("blipit")
-                description.set("Blipit error monitoring for Java and Kotlin. Know your app broke before your users tell you.")
+                description.set("Blipit error monitoring for Java and Kotlin, built on blipit-nuggets. Know your app broke before your users tell you.")
                 url.set("https://docs.blipit.io/java")
                 licenses {
                     license {
